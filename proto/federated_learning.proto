@@ -1,0 +1,112 @@
+syntax = "proto3";
+
+package federated_learning;
+
+// Model parameters representation
+message ModelParameters {
+    repeated float weights = 1;
+    repeated float biases = 2;
+    repeated int32 weight_shape = 3;  // Shape of weight tensor
+    repeated int32 bias_shape = 4;    // Shape of bias tensor
+}
+
+// Training status enumeration
+enum TrainingStatus {
+    INITIALIZED = 0;
+    TRAINING = 1;
+    READY = 2;
+}
+
+// Client registration request
+message RegisterRequest {
+    string client_id = 1;
+    string client_ip = 2;
+    string model_name = 3;
+}
+
+// Client registration response
+message RegisterResponse {
+    bool success = 1;
+    string message = 2;
+}
+
+// Model initialization request
+message InitRequest {
+    string model_name = 1;
+}
+
+// Model initialization response  
+message InitResponse {
+    bool success = 1;
+    string message = 2;
+}
+
+// Training request
+message TrainRequest {
+    string model_name = 1;
+    int32 rounds = 2;
+}
+
+// Training response
+message TrainResponse {
+    bool success = 1;
+    string message = 2;
+    int32 completed_rounds = 3;
+}
+
+// Get model request
+message GetModelRequest {
+    string model_name = 1;
+}
+
+// Get model response
+message GetModelResponse {
+    bool success = 1;
+    ModelParameters parameters = 2;
+    TrainingStatus status = 3;
+    string message = 4;
+}
+
+// Test model request
+message TestModelRequest {
+    string model_name = 1;
+}
+
+// Test model response
+message TestModelResponse {
+    bool success = 1;
+    float accuracy = 2;
+    string message = 3;
+}
+
+// Client training request (server to client)
+message ClientTrainRequest {
+    string model_name = 1;
+    ModelParameters global_parameters = 2;
+    repeated float train_data = 3;     // Flattened training data
+    repeated int32 train_labels = 4;   // Training labels
+    int32 epochs = 5;
+}
+
+// Client training response
+message ClientTrainResponse {
+    bool success = 1;
+    ModelParameters updated_parameters = 2;
+    string message = 3;
+}
+
+// Parameter server service
+service ParameterServer {
+    rpc Register(RegisterRequest) returns (RegisterResponse);
+    rpc Init(InitRequest) returns (InitResponse);
+    rpc Train(TrainRequest) returns (TrainResponse);
+    rpc GetModel(GetModelRequest) returns (GetModelResponse);
+    rpc TestModel(TestModelRequest) returns (TestModelResponse);
+}
+
+// Client service (for server to call back)
+service FederatedClient {
+    rpc TrainLocal(ClientTrainRequest) returns (ClientTrainResponse);
+    rpc GetLocalModel(GetModelRequest) returns (GetModelResponse);
+    rpc TestLocal(TestModelRequest) returns (TestModelResponse);
+}
