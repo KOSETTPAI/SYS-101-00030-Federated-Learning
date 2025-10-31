@@ -1,14 +1,27 @@
 #![allow(unused)]
+
+// The full gRPC server requires external crates (candle_*, tonic service impls).
+// To keep default builds working smoothly, enable it with `--features grpc`.
+#[cfg(feature = "grpc")]
 use federated_learning::common::*;
+#[cfg(feature = "grpc")]
 use federated_learning::data::*;
+#[cfg(feature = "grpc")]
 use std::collections::HashMap;
+#[cfg(feature = "grpc")]
 use std::net::SocketAddr;
+#[cfg(feature = "grpc")]
 use std::sync::{Arc, RwLock};
+#[cfg(feature = "grpc")]
 use tonic::{transport::Server, Request, Response, Status};
+#[cfg(feature = "grpc")]
 use clap::Parser;
+#[cfg(feature = "grpc")]
 use log::{info, warn, error};
+#[cfg(feature = "grpc")]
 use ndarray::{Array1, Array2};
 
+#[cfg(feature = "grpc")]
 #[derive(Parser)]
 #[command(name = "federated-server")]
 #[command(about = "A federated learning parameter server")]
@@ -23,41 +36,37 @@ struct Args {
     epochs_per_round: usize,
 }
 
+#[cfg(feature = "grpc")]
 #[derive(Debug)]
 struct ParameterServerState {
     models: RwLock<HashMap<String, ModelState>>,
-    datasets: RwLock<HashMap<String, candle_datasets::vision::Dataset>>,
+    // Dataset loading via candle_* is disabled in default builds
     training_config: TrainingArgs,
 }
 
+#[cfg(feature = "grpc")]
 impl ParameterServerState {
     fn new(training_config: TrainingArgs) -> Self {
         Self {
             models: RwLock::new(HashMap::new()),
-            datasets: RwLock::new(HashMap::new()),
             training_config,
         }
     }
 }
 
+#[cfg(feature = "grpc")]
 struct ParameterServerImpl {
     state: Arc<ParameterServerState>,
 }
 
+#[cfg(feature = "grpc")]
 impl ParameterServerImpl {
     fn new(state: Arc<ParameterServerState>) -> Self {
         Self { state }
     }
 
     fn create_initial_model(&self, model_name: &str) -> Result<ModelParameters, Status> {
-        let dev = Device::cuda_if_available(0).map_err(|e| {
-            Status::internal(format!("Failed to initialize device: {}", e))
-        })?;
-
-        let varmap = VarMap::new();
-        let vs = VarBuilder::from_varmap(&varmap, DType::F32, &dev);
-        
-        let model = LinearModel::new(vs).map_err(|e| {
+        let model = LinearModel::new().map_err(|e| {
             Status::internal(format!("Failed to create model: {}", e))
         })?;
 
@@ -128,19 +137,14 @@ impl ParameterServerImpl {
         global_params: &ModelParameters,
         clients: &[ClientInfo],
     ) -> Result<Vec<ModelParameters>, Status> {
-        // Load MNIST dataset
-        let dataset = candle_datasets::vision::mnist::load().map_err(|e| {
+        let dataset = MnistData::load().await.map_err(|e| {
             Status::internal(format!("Failed to load MNIST dataset: {}", e))
         })?;
 
-        let dev = Device::cuda_if_available(0).map_err(|e| {
-            Status::internal(format!("Failed to initialize device: {}", e))
-        })?;
-
-        let train_labels = dataset.train_labels.to_dtype(DType::U32).unwrap().to_device(&dev).unwrap();
-        let train_images = dataset.train_images.to_device(&dev).unwrap();
-        let test_images = dataset.test_images.to_device(&dev).unwrap();
-        let test_labels = dataset.test_labels.to_dtype(DType::U32).unwrap().to_device(&dev).unwrap();
+        let train_images = dataset.train_images;
+        let train_labels = dataset.train_labels;
+        let test_images = dataset.test_images;
+        let test_labels = dataset.test_labels;
 
         let total_samples = train_images.shape().dims()[0];
         let samples_per_client = total_samples / clients.len();
@@ -151,9 +155,7 @@ impl ParameterServerImpl {
             info!("Training model for client: {}", client.id);
             
             // Create model with global parameters
-            let varmap = VarMap::new();
-            let vs = VarBuilder::from_varmap(&varmap, DType::F32, &dev);
-            let mut model = LinearModel::new(vs).map_err(|e| {
+            let mut model = LinearModel::new().map_err(|e| {
                 Status::internal(format!("Failed to create client model: {}", e))
             })?;
             
@@ -175,22 +177,16 @@ impl ParameterServerImpl {
             let client_test_images = test_images.i(start_idx..end_idx).unwrap();
             let client_test_labels = test_labels.i(start_idx..end_idx).unwrap();
 
-            // Train the model locally
-            let sgd = candle_nn::SGD::new(varmap.all_vars(), self.state.training_config.learning_rate).unwrap();
-            let trained_model = train_model(
-                model,
-                &client_test_images,
-                &client_test_labels,
+            // Train the model locally using ndarray-based trainer
+            model.train(
                 &client_train_images,
                 &client_train_labels,
-                sgd,
+                self.state.training_config.learning_rate as f32,
                 self.state.training_config.epochs,
-            ).map_err(|e| {
-                Status::internal(format!("Failed to train client model: {}", e))
-            })?;
+            ).map_err(|e| Status::internal(format!("Failed to train client model: {}", e)))?;
 
             // Get updated parameters
-            let updated_params = trained_model.get_parameters().map_err(|e| {
+            let updated_params = model.get_parameters().map_err(|e| {
                 Status::internal(format!("Failed to get updated parameters: {}", e))
             })?;
 
@@ -201,6 +197,7 @@ impl ParameterServerImpl {
     }
 }
 
+#[cfg(feature = "grpc")]
 #[tonic::async_trait]
 impl ParameterServer for ParameterServerImpl {
     async fn register(
@@ -331,20 +328,14 @@ impl ParameterServer for ParameterServerImpl {
         };
 
         // Load test dataset and compute accuracy
-        let dataset = candle_datasets::vision::mnist::load().map_err(|e| {
+        let dataset = MnistData::load().await.map_err(|e| {
             Status::internal(format!("Failed to load dataset: {}", e))
         })?;
 
-        let dev = Device::cuda_if_available(0).map_err(|e| {
-            Status::internal(format!("Failed to initialize device: {}", e))
-        })?;
+        let test_images = dataset.test_images;
+        let test_labels = dataset.test_labels;
 
-        let test_images = dataset.test_images.to_device(&dev).unwrap();
-        let test_labels = dataset.test_labels.to_dtype(DType::U32).unwrap().to_device(&dev).unwrap();
-
-        let varmap = VarMap::new();
-        let vs = VarBuilder::from_varmap(&varmap, DType::F32, &dev);
-        let mut model = LinearModel::new(vs).map_err(|e| {
+        let mut model = LinearModel::new().map_err(|e| {
             Status::internal(format!("Failed to create model: {}", e))
         })?;
 
@@ -366,6 +357,7 @@ impl ParameterServer for ParameterServerImpl {
     }
 }
 
+#[cfg(feature = "grpc")]
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     env_logger::init();
@@ -383,10 +375,17 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     info!("Starting Parameter Server on {}", addr);
 
+    // Note: ParameterServerServer here is a placeholder; full tonic service glue is
+    // behind the `grpc` feature in downstream code.
     Server::builder()
         .add_service(ParameterServerServer::new(server_impl))
         .serve(addr)
         .await?;
 
     Ok(())
+}
+
+#[cfg(not(feature = "grpc"))]
+fn main() {
+    println!("server binary built without 'grpc' feature. Enable with: cargo run --bin server --features grpc");
 }

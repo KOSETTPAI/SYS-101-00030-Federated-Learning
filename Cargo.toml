@@ -28,7 +28,10 @@ rand = "0.8"
 log = "0.4"
 env_logger = "0.10"
 ndarray = "0.15"
-reqwest = { version = "0.11", features = ["json"] }
+reqwest = { version = "0.11", default-features = false, features = ["json", "rustls-tls"] }
 flate2 = "1.0"
 byteorder = "1.4"
+
+[features]
+grpc = []
 

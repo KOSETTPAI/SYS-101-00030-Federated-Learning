@@ -1,14 +1,27 @@
 #![allow(unused)]
+
+// The interactive gRPC client depends on networking and external crates.
+// Keep default builds working; enable full client with `--features grpc`.
+#[cfg(feature = "grpc")]
 use federated_learning::common::*;
+#[cfg(feature = "grpc")]
 use federated_learning::data::*;
+#[cfg(feature = "grpc")]
 use std::collections::HashMap;
+#[cfg(feature = "grpc")]
 use std::sync::{Arc, RwLock};
+#[cfg(feature = "grpc")]
 use tonic::{transport::Channel, Request, Response, Status};
+#[cfg(feature = "grpc")]
 use clap::Parser;
+#[cfg(feature = "grpc")]
 use log::{info, warn, error};
+#[cfg(feature = "grpc")]
 use uuid::Uuid;
+#[cfg(feature = "grpc")]
 use ndarray::{Array1, Array2};
 
+#[cfg(feature = "grpc")]
 #[derive(Parser)]
 #[command(name = "federated-client")]
 #[command(about = "A federated learning client")]
@@ -32,6 +45,7 @@ struct Args {
     client_id: Option<String>,
 }
 
+#[cfg(feature = "grpc")]
 #[derive(Debug)]
 struct ClientState {
     models: RwLock<HashMap<String, LinearModel>>,
@@ -40,6 +54,7 @@ struct ClientState {
     server_address: String,
 }
 
+#[cfg(feature = "grpc")]
 impl ClientState {
     fn new(training_config: TrainingArgs, client_id: String, server_address: String) -> Self {
         Self {
@@ -51,10 +66,12 @@ impl ClientState {
     }
 }
 
+#[cfg(feature = "grpc")]
 struct FederatedClientImpl {
     state: Arc<ClientState>,
 }
 
+#[cfg(feature = "grpc")]
 impl FederatedClientImpl {
     fn new(state: Arc<ClientState>) -> Self {
         Self { state }
@@ -111,36 +128,28 @@ impl FederatedClientImpl {
         let global_params = self.get_global_model(model_name).await?;
 
         // Load MNIST dataset
-        let dataset = candle_datasets::vision::mnist::load()?;
-        let dev = Device::cuda_if_available(0)?;
-
-        let train_labels = dataset.train_labels.to_dtype(DType::U32)?.to_device(&dev)?;
-        let train_images = dataset.train_images.to_device(&dev)?;
-        let test_images = dataset.test_images.to_device(&dev)?;
-        let test_labels = dataset.test_labels.to_dtype(DType::U32)?.to_device(&dev)?;
+        let dataset = MnistData::load().await?;
+        let train_images = dataset.train_images;
+        let train_labels = dataset.train_labels;
+        let test_images = dataset.test_images;
+        let test_labels = dataset.test_labels;
 
         // Create local model and set global parameters
-        let varmap = VarMap::new();
-        let vs = VarBuilder::from_varmap(&varmap, DType::F32, &dev);
-        let mut model = LinearModel::new(vs)?;
+        let mut model = LinearModel::new()?;
         model.set_parameters(&global_params)?;
 
         // For simplicity, train on full dataset (in practice, each client would have subset)
-        let sgd = candle_nn::SGD::new(varmap.all_vars(), self.state.training_config.learning_rate)?;
-        let trained_model = train_model(
-            model,
-            &test_images,
-            &test_labels,
+        model.train(
             &train_images,
             &train_labels,
-            sgd,
+            self.state.training_config.learning_rate as f32,
             self.state.training_config.epochs,
         )?;
 
         // Store the trained model
         {
             let mut models = self.state.models.write().unwrap();
-            models.insert(model_name.to_string(), trained_model);
+            models.insert(model_name.to_string(), model);
         }
 
         info!("Completed local training for model: {}", model_name);
@@ -154,11 +163,9 @@ impl FederatedClientImpl {
         };
 
         // Load test dataset
-        let dataset = candle_datasets::vision::mnist::load()?;
-        let dev = Device::cuda_if_available(0)?;
-
-        let test_images = dataset.test_images.to_device(&dev)?;
-        let test_labels = dataset.test_labels.to_dtype(DType::U32)?.to_device(&dev)?;
+        let dataset = MnistData::load().await?;
+        let test_images = dataset.test_images;
+        let test_labels = dataset.test_labels;
 
         let accuracy = calculate_accuracy(&model, &test_images, &test_labels)?;
         info!("Local model {} test accuracy: {:.2}%", model_name, accuracy * 100.0);
@@ -167,6 +174,7 @@ impl FederatedClientImpl {
     }
 }
 
+#[cfg(feature = "grpc")]
 #[tonic::async_trait]
 impl FederatedClient for FederatedClientImpl {
     async fn train_local(
@@ -279,6 +287,7 @@ impl FederatedClient for FederatedClientImpl {
     }
 }
 
+#[cfg(feature = "grpc")]
 async fn run_interactive_client(client_impl: Arc<FederatedClientImpl>, model_name: String) -> Result<(), Box<dyn std::error::Error>> {
     use std::io::{self, Write};
 
@@ -419,6 +428,7 @@ async fn run_interactive_client(client_impl: Arc<FederatedClientImpl>, model_nam
     Ok(())
 }
 
+#[cfg(feature = "grpc")]
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     env_logger::init();
@@ -450,4 +460,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     run_interactive_client(client_impl, args.model_name).await?;
 
     Ok(())
+}
+
+#[cfg(not(feature = "grpc"))]
+fn main() {
+    println!("client binary built without 'grpc' feature. Enable with: cargo run --bin client --features grpc");
 }
