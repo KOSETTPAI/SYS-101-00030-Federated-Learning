@@ -35,3 +35,7 @@ byteorder = "1.4"
 [features]
 grpc = []
 
+[build-dependencies]
+tonic-build = "0.9"
+protoc-bin-vendored = "3.1"
+

@@ -4,8 +4,8 @@ use std::sync::{Arc, RwLock};
 use ndarray::{Array1, Array2};
 use rand::Rng;
 
-// Use our manual protobuf implementation
-pub use crate::generated::*;
+// Re-export generated proto types
+pub use crate::federated_learning::*;
 
 pub const IMAGE_DIM: usize = 784;
 pub const LABELS: usize = 10;

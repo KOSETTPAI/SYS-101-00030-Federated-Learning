@@ -7,6 +7,10 @@ use federated_learning::common::*;
 #[cfg(feature = "grpc")]
 use federated_learning::data::*;
 #[cfg(feature = "grpc")]
+use federated_learning::parameter_server_client::ParameterServerClient;
+#[cfg(feature = "grpc")]
+use federated_learning::federated_client_server::FederatedClient;
+#[cfg(feature = "grpc")]
 use std::collections::HashMap;
 #[cfg(feature = "grpc")]
 use std::sync::{Arc, RwLock};
@@ -246,7 +250,7 @@ impl FederatedClient for FederatedClientImpl {
                         Ok(Response::new(GetModelResponse {
                             success: true,
                             parameters: Some(params),
-                            status: TrainingStatus::Ready,
+                            status: TrainingStatus::Ready as i32,
                             message: "Model retrieved".to_string(),
                         }))
                     }

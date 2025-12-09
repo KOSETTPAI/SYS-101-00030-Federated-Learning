@@ -1,7 +1,5 @@
 #![allow(unused)]
 
-// The full gRPC server requires external crates (candle_*, tonic service impls).
-// To keep default builds working smoothly, enable it with `--features grpc`.
 #[cfg(feature = "grpc")]
 use federated_learning::common::*;
 #[cfg(feature = "grpc")]
@@ -19,7 +17,9 @@ use clap::Parser;
 #[cfg(feature = "grpc")]
 use log::{info, warn, error};
 #[cfg(feature = "grpc")]
-use ndarray::{Array1, Array2};
+use ndarray::{s, Array1, Array2};
+#[cfg(feature = "grpc")]
+use federated_learning::parameter_server_server::{ParameterServer, ParameterServerServer};
 
 #[cfg(feature = "grpc")]
 #[derive(Parser)]
@@ -146,7 +146,7 @@ impl ParameterServerImpl {
         let test_images = dataset.test_images;
         let test_labels = dataset.test_labels;
 
-        let total_samples = train_images.shape().dims()[0];
+        let total_samples = train_images.shape()[0];
         let samples_per_client = total_samples / clients.len();
         
         let mut client_params = Vec::new();
@@ -172,10 +172,10 @@ impl ParameterServerImpl {
                 (i + 1) * samples_per_client
             };
 
-            let client_train_images = train_images.i(start_idx..end_idx).unwrap();
-            let client_train_labels = train_labels.i(start_idx..end_idx).unwrap();
-            let client_test_images = test_images.i(start_idx..end_idx).unwrap();
-            let client_test_labels = test_labels.i(start_idx..end_idx).unwrap();
+            let client_train_images = train_images.slice(s![start_idx..end_idx, ..]).to_owned();
+            let client_train_labels = train_labels.slice(s![start_idx..end_idx]).to_owned();
+            let client_test_images = test_images.slice(s![start_idx..end_idx, ..]).to_owned();
+            let client_test_labels = test_labels.slice(s![start_idx..end_idx]).to_owned();
 
             // Train the model locally using ndarray-based trainer
             model.train(
@@ -304,7 +304,7 @@ impl ParameterServer for ParameterServerImpl {
         Ok(Response::new(GetModelResponse {
             success: true,
             parameters: model_state.parameters.clone(),
-            status: model_state.status.clone().into(),
+            status: TrainingStatus::from(model_state.status.clone()) as i32,
             message: format!("Model {} retrieved", req.model_name),
         }))
     }
@@ -361,22 +361,20 @@ impl ParameterServer for ParameterServerImpl {
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     env_logger::init();
-    
+
     let args = Args::parse();
     let addr: SocketAddr = args.address.parse()?;
-    
+
     let training_config = TrainingArgs {
         learning_rate: args.learning_rate,
         epochs: args.epochs_per_round,
     };
-    
+
     let state = Arc::new(ParameterServerState::new(training_config));
     let server_impl = ParameterServerImpl::new(state);
 
     info!("Starting Parameter Server on {}", addr);
 
-    // Note: ParameterServerServer here is a placeholder; full tonic service glue is
-    // behind the `grpc` feature in downstream code.
     Server::builder()
         .add_service(ParameterServerServer::new(server_impl))
         .serve(addr)
