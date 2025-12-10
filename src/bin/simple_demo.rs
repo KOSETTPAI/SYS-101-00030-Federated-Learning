@@ -59,7 +59,7 @@ async fn main() -> anyhow::Result<()> {
             client_models.push(client_model);
         }
         
-        // Step 3b: Local training on each client
+        // Step 3b: Local training on each client (all share full dataset)
         for (client_id, (client_model, (client_images, client_labels))) in 
             client_models.iter_mut().zip(client_datasets.iter()).enumerate() 
         {

@@ -15,11 +15,11 @@ use tonic::{transport::Server, Request, Response, Status};
 #[cfg(feature = "grpc")]
 use clap::Parser;
 #[cfg(feature = "grpc")]
-use log::{info, warn, error};
-#[cfg(feature = "grpc")]
-use ndarray::{s, Array1, Array2};
+use log::{info, error};
 #[cfg(feature = "grpc")]
 use federated_learning::parameter_server_server::{ParameterServer, ParameterServerServer};
+#[cfg(feature = "grpc")]
+use ndarray::s;
 
 #[cfg(feature = "grpc")]
 #[derive(Parser)]
@@ -109,7 +109,7 @@ impl ParameterServerImpl {
             models.get(model_name).unwrap().parameters.clone().unwrap()
         };
 
-        // Simulate client training (in a real implementation, you would call clients via gRPC)
+        // Simulate client training (no RPC; local FedAvg with IID splits)
         let client_params = self.simulate_client_training(model_name, &global_params, &clients).await?;
         
         // Perform federated averaging
@@ -143,9 +143,6 @@ impl ParameterServerImpl {
 
         let train_images = dataset.train_images;
         let train_labels = dataset.train_labels;
-        let test_images = dataset.test_images;
-        let test_labels = dataset.test_labels;
-
         let total_samples = train_images.shape()[0];
         let samples_per_client = total_samples / clients.len();
         
@@ -172,10 +169,8 @@ impl ParameterServerImpl {
                 (i + 1) * samples_per_client
             };
 
-            let client_train_images = train_images.slice(s![start_idx..end_idx, ..]).to_owned();
-            let client_train_labels = train_labels.slice(s![start_idx..end_idx]).to_owned();
-            let client_test_images = test_images.slice(s![start_idx..end_idx, ..]).to_owned();
-            let client_test_labels = test_labels.slice(s![start_idx..end_idx]).to_owned();
+            let client_train_images = train_images.slice(ndarray::s![start_idx..end_idx, ..]).to_owned();
+            let client_train_labels = train_labels.slice(ndarray::s![start_idx..end_idx]).to_owned();
 
             // Train the model locally using ndarray-based trainer
             model.train(
